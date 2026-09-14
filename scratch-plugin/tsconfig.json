@@ -1,0 +1,27 @@
+{
+  // 让 scratch-plugin 复用仓库根 tsconfig.base.json 的 paths 映射与已构建的
+  // 包声明，使 IDE 与 `npx tsc -p scratch-plugin` 都能解析 @deepseek-ai/* 工作区包。
+  //
+  // 用 project references（而非直接读 vendor/packages 源码）是必须的：vendor 的
+  // 源文件在自身的 tsconfig 里放宽了 strict 选项，按 base 的严格度直接检查它们
+  // 会产生大量与插件无关的报错。
+  //
+  // 前置条件：仓库已执行过 `pnpm run build`（references 消费 lib/types 声明）。
+  // 本目录不在 tsconfig.host.json / tsconfig.client.json 的 references 中，
+  // 因此不参与仓库自身的 typecheck / build。
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "incremental": false
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../vendor/cordis" },
+    { "path": "../packages/core/tools" }
+  ]
+}
