@@ -2,7 +2,8 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { delimiter, dirname, join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import {
   DESKTOP_HOST_PROTOCOL_VERSION,
@@ -44,6 +45,54 @@ function isDesktopHostEvent(message: unknown): message is DesktopHostEvent {
 
 function errorOf(reason: unknown, fallback: string): Error {
   return reason instanceof Error ? reason : new Error(fallback)
+}
+
+interface BundledToolManifest {
+  readonly tools: readonly { readonly name: string; readonly pathDir: string }[]
+}
+
+/**
+ * Build the PATH entries for bundled runtime tools.
+ *
+ * When `runtimeDir/tools/tools-manifest.json` exists (packaged builds with
+ * bundled developer tools), each tool's entry directory is prepended so the
+ * host process and its plugin children find the bundled versions first.
+ * The bundled Node directory is always included.
+ */
+/**
+ * Build the child process environment: strip runtime/pnpm variables, then
+ * prepend bundled tool and Node directories to PATH so plugins find the
+ * bundled versions before anything on the system.
+ */
+function buildChildEnvironment(
+  parentEnv: NodeJS.ProcessEnv,
+  runtimeDir: string,
+  nodePath: string,
+): NodeJS.ProcessEnv {
+  const entries = Object.fromEntries(Object.entries(parentEnv).filter(([name]) => (
+    name !== 'NODE_OPTIONS' && name !== 'NODE_PATH' && !/^DSH_DESKTOP_/u.test(name) && !/^(?:npm|pnpm|corepack)_/iu.test(name)
+  )))
+  const pathEntries = buildRuntimePathEntries(runtimeDir, nodePath)
+  const existingPath = entries.PATH ?? entries.Path ?? entries.path ?? ''
+  entries.PATH = `${pathEntries.join(delimiter)}${delimiter}${existingPath}`
+  return entries
+}
+
+function buildRuntimePathEntries(runtimeDir: string, nodePath: string): readonly string[] {
+  const entries: string[] = []
+  const manifestPath = join(runtimeDir, 'tools', 'tools-manifest.json')
+  if (existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as BundledToolManifest
+      for (const tool of manifest.tools) {
+        entries.push(tool.pathDir === '' ? join(runtimeDir, 'tools', tool.name) : join(runtimeDir, 'tools', tool.name, tool.pathDir))
+      }
+    } catch {
+      // Corrupt manifest — skip tool PATH injection rather than aborting the host.
+    }
+  }
+  entries.push(dirname(nodePath))
+  return entries
 }
 
 async function exitsWithin(exit: Promise<void>, milliseconds: number): Promise<boolean> {
@@ -114,9 +163,7 @@ export class DesktopHostProcess {
       ...(this.inspectPort === undefined ? [] : ['--allow-linked-profile']),
     ], {
       cwd: this.projectDir,
-      env: Object.fromEntries(Object.entries(this.environment).filter(([name]) => (
-        name !== 'NODE_OPTIONS' && name !== 'NODE_PATH' && !/^DSH_DESKTOP_/u.test(name) && !/^(?:npm|pnpm|corepack)_/iu.test(name)
-      ))),
+      env: buildChildEnvironment(this.environment, this.runtimeDir, this.node),
       stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe', 'ipc'],
     })
     const requestPipe = child.stdio[DESKTOP_REQUEST_PIPE_FD]

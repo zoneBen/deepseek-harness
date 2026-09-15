@@ -322,6 +322,10 @@ async function main(): Promise<void> {
     buildPaths.packedLandlock,
   ], buildEnv, REPOSITORY_ROOT)
   await runPnpm(['run', 'prepare:runtime'], targetEnv)
+  // Bundled developer tools (git, python, pandoc, etc.) are staged into
+  // runtime/tools/ when their source archives are available in downloads/.
+  // Tools are optional — missing downloads are skipped silently.
+  await runPnpm(['run', 'prepare:tools'], targetEnv)
   await runPnpm(['run', 'prepare:packages'], targetEnv)
   await runPnpm(['run', 'prepare:dsh'], targetEnv)
   if (invocation.prepareOnly) return
