@@ -145,6 +145,18 @@ pnpm run package:desktop:win:x64:unsigned
 
 The command requires `DSH_DESKTOP_APP_ID` and the normal build dependencies, including Python and Visual C++ build tools for native modules. Set `PYTHON` to the Python executable when it is absent from `PATH`. It writes the installer to `.desktop-build/targets/win-x64/unsigned-artifacts/`, omits automatic-update configuration, strips signing credentials, and creates no release completion record. It does not require EV credentials or an update origin. The signed packaging and upload commands retain their release requirements.
 
+### Portable Windows archive
+
+On Windows x64, use the portable packaging command to produce an archive that extracts into a self-contained folder:
+
+```sh
+pnpm run package:desktop:win:x64:portable
+```
+
+It requires the same environment as the unsigned installer and adds no release credentials. It writes `deepseek-harness-<version>-win-x64.zip` to `.desktop-build/targets/win-x64/unsigned-artifacts/`. The archive is flat: extracting it yields the executable, `portable.txt`, and `resources/` directly, so extract it into a folder rather than into the current directory.
+
+While `portable.txt` sits beside the executable, the application keeps its Harness home in `data/home/`, its browser profile in `data/electron-data/`, and its browser cache in `data/electron-cache/`, all under that folder instead of in the user profile. Deleting the marker restores the installed layout. An explicitly set `DSH_HOME` overrides the sibling home. Extract to a writable directory on an NTFS volume, because the profile links plugins with directory junctions. The [portable-layout decision](../../.agents/notes/implemented/architecture/2026-09-14-desktop-windows-portable-build.md) owns the marker contract and the alternatives it rejected.
+
 ### Windows EV signing
 
 Windows packaging fixes the 7-Zip filter to `BCJ` for compatibility with the bundled NSIS decoder. This preserves ARM64 binaries carried by dependencies in x64 installers; automatic ARM64 filtering produces entries that this decoder cannot extract.

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { existsSync } from 'node:fs'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   desktopElectronBuilderArguments,
   desktopElectronBuilderEnvironment,
@@ -8,7 +9,31 @@ import {
   withoutWindowsSigningEnvironment,
 } from '../scripts/package-target.ts'
 
+/** Environment that produces an unsigned Windows x64 configuration without release credentials. */
+const WINDOWS_UNSIGNED_ENVIRONMENT = {
+  DSH_DESKTOP_APP_ID: 'com.example.desktop',
+  DSH_DESKTOP_TARGET_PLATFORM: 'win32',
+  DSH_DESKTOP_TARGET_ARCH: 'x64',
+  DSH_DESKTOP_UNSIGNED: '1',
+}
+
+function portablePath(value: string): string {
+  return value.replaceAll('\\', '/')
+}
+
 describe('desktop package target', () => {
+  // Importing the configuration evaluates its default export, which requires the
+  // application identifier and resolves the update channel of an unsigned host.
+  beforeAll(() => {
+    vi.stubEnv('DSH_DESKTOP_APP_ID', 'com.example.desktop')
+    vi.stubEnv('DSH_DESKTOP_UNSIGNED', '1')
+    vi.stubEnv('DOWNLOAD_TEST_ORIGIN', 'https://desktop-updates.example.com')
+  })
+
+  afterAll(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('selects matching runtime and electron-builder architectures', () => {
     expect(resolveDesktopPackageTarget('mac-arm64', 'darwin', 'arm64')).toMatchObject({
       platform: 'darwin', arch: 'arm64', builderPlatform: '--mac', builderArch: '--arm64',
@@ -67,6 +92,58 @@ describe('desktop package target', () => {
       .toThrow(/requires win-x64/u)
     expect(() => parseDesktopPackageInvocation(['--unsigned', '--prepare-only'], 'win32', 'x64'))
       .toThrow(/cannot use --prepare-only/u)
+  })
+
+  it('accepts a portable Windows archive and implies an unsigned build', () => {
+    expect(parseDesktopPackageInvocation(['win-x64', '--portable'], 'win32', 'x64')).toMatchObject({
+      portable: true, unsigned: true, directory: false, prepareOnly: false,
+    })
+    expect(parseDesktopPackageInvocation(['win-x64'], 'win32', 'x64').portable).toBe(false)
+    // An unpacked portable folder is the short path for exercising the runtime without archiving.
+    expect(parseDesktopPackageInvocation(['--portable', '--dir'], 'win32', 'x64')).toMatchObject({
+      portable: true, unsigned: true, directory: true,
+    })
+    expect(() => parseDesktopPackageInvocation(['mac-arm64', '--portable'], 'darwin', 'arm64'))
+      .toThrow(/requires win-x64/u)
+    expect(() => parseDesktopPackageInvocation(['--portable', '--prepare-only'], 'win32', 'x64'))
+      .toThrow(/cannot use --prepare-only/u)
+  })
+
+  it('archives the portable build with the marker beside the executable', async () => {
+    const { createElectronBuilderConfig } = await import('../electron-builder.config.mjs')
+    const installer = createElectronBuilderConfig(WINDOWS_UNSIGNED_ENVIRONMENT, 'win32', 'x64')
+    expect(installer.win.target).toEqual(['nsis'])
+    expect(installer.win.extraFiles).toBeUndefined()
+
+    const portable = createElectronBuilderConfig(
+      { ...WINDOWS_UNSIGNED_ENVIRONMENT, DSH_DESKTOP_PORTABLE: '1' },
+      'win32',
+      'x64',
+    )
+    expect(portable.win.target).toEqual(['zip'])
+    const files = portable.win.extraFiles ?? []
+    expect(files).toHaveLength(1)
+    expect(files[0]?.to).toBe('portable.txt')
+    // The shipped marker must be a real file: a wrong relative path fails only at build time.
+    expect(existsSync(files[0]?.from ?? '')).toBe(true)
+    expect(portablePath(files[0]?.from ?? '')).toMatch(/\/scripts\/portable\.txt$/u)
+
+    expect(() => createElectronBuilderConfig(
+      { ...WINDOWS_UNSIGNED_ENVIRONMENT, DSH_DESKTOP_PORTABLE: 'yes' },
+      'win32',
+      'x64',
+    )).toThrow(/must be 0 or 1/u)
+    expect(() => createElectronBuilderConfig(
+      {
+        ...WINDOWS_UNSIGNED_ENVIRONMENT,
+        DSH_DESKTOP_TARGET_PLATFORM: 'darwin',
+        DSH_DESKTOP_TARGET_ARCH: 'arm64',
+        DSH_DESKTOP_UNSIGNED: '0',
+        DSH_DESKTOP_PORTABLE: '1',
+      },
+      'darwin',
+      'arm64',
+    )).toThrow(/portable builds require Windows/u)
   })
 
   it('removes ambient certificate inputs for unsigned builds and overrides an inherited signing mode', () => {

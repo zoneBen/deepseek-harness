@@ -1,0 +1,6 @@
+Portable layout marker.
+
+Shipped beside the executable by the `package:win:x64:portable` build. Its
+presence makes the packaged application keep its Harness home, Electron
+profile, and Electron cache in a sibling `data/` directory instead of the
+user profile. Delete this file to fall back to the installed layout.

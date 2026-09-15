@@ -63,6 +63,7 @@ const harness = await vi.hoisted(async () => {
     getLocale: () => 'en-US',
     getVersion: () => '1.0.0',
     getAppPath: () => 'desktop-test-app',
+    setPath: vi.fn(),
     requestSingleInstanceLock: () => true,
     exit: vi.fn(),
     relaunch: vi.fn(),

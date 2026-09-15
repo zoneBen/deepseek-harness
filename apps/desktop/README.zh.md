@@ -145,6 +145,18 @@ pnpm run package:desktop:win:x64:unsigned
 
 该命令要求设置 `DSH_DESKTOP_APP_ID` 并具备常规构建依赖，包括编译原生模块所需的 Python 和 Visual C++ 构建工具。Python 不在 `PATH` 中时，将 `PYTHON` 设置为其可执行文件路径。命令将安装包写入 `.desktop-build/targets/win-x64/unsigned-artifacts/`，省略自动更新配置，清除签名凭据，且不生成发布完成记录。它不需要 EV 凭据或更新源地址。签名打包和上传命令仍遵循正式发布要求。
 
+### Windows 便携版压缩包
+
+在 Windows x64 上，使用便携版打包命令生成解压即用的压缩包：
+
+```sh
+pnpm run package:desktop:win:x64:portable
+```
+
+它要求与未签名安装包相同的环境，且不需要任何发布凭据。命令将 `deepseek-harness-<version>-win-x64.zip` 写入 `.desktop-build/targets/win-x64/unsigned-artifacts/`。该压缩包是平铺的：解压后直接得到可执行文件、`portable.txt` 和 `resources/`，因此请解压到一个文件夹中，而不是解压到当前目录。
+
+当 `portable.txt` 位于可执行文件旁时，应用把 Harness 主目录放在 `data/home/`、浏览器配置放在 `data/electron-data/`、浏览器缓存放在 `data/electron-cache/`，全部位于该文件夹下而非用户主目录。删除标记即恢复安装版布局。显式设置的 `DSH_HOME` 优先于同级主目录。请解压到 NTFS 卷上的可写目录，因为 profile 使用目录 junction 链接插件。[便携版布局决策](../../.agents/notes/implemented/architecture/2026-09-14-desktop-windows-portable-build.zh.md)负责标记契约及其否决的方案。
+
 ### Windows EV 签名
 
 Windows 打包将 7-Zip 过滤器固定为 `BCJ`，以兼容内置的 NSIS 解码器。这样可以保留 x64 安装包中由依赖携带的 ARM64 二进制文件；自动 ARM64 过滤会生成该解码器无法解压的条目。

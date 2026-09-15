@@ -35,6 +35,11 @@ export function createElectronBuilderConfig(
   }
   const unsigned = env.DSH_DESKTOP_UNSIGNED === '1'
   if (unsigned && resolvedPlatform !== 'win32') throw new Error('desktop package: unsigned builds require Windows')
+  if (env.DSH_DESKTOP_PORTABLE !== undefined && !['0', '1'].includes(env.DSH_DESKTOP_PORTABLE)) {
+    throw new Error('desktop package: DSH_DESKTOP_PORTABLE must be 0 or 1')
+  }
+  const portable = env.DSH_DESKTOP_PORTABLE === '1'
+  if (portable && resolvedPlatform !== 'win32') throw new Error('desktop package: portable builds require Windows')
   const packagesMacOS = targetPlatform === 'darwin' || (targetPlatform === undefined && hostPlatform === 'darwin')
   const packagesWindows = targetPlatform === 'win32'
   const macOSSigning = packagesMacOS ? resolveMacOSSigningEnvironment(env) : undefined
@@ -110,7 +115,12 @@ export function createElectronBuilderConfig(
         sign: windowsSigner,
         signingHashAlgorithms: ['sha256'],
       },
-      target: ['nsis'],
+      target: portable ? ['zip'] : ['nsis'],
+      // The marker beside the executable opts the packaged application into keeping
+      // its Harness home and Electron profile in a sibling `data/`.
+      ...(portable
+        ? { extraFiles: [{ from: fileURLToPath(new URL('./scripts/portable.txt', import.meta.url)), to: 'portable.txt' }] }
+        : {}),
     },
     linux: {
       category: 'Development',

@@ -13,6 +13,7 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { resolveDesktopPaths } from './paths.ts'
+import { applyPortableLayout } from './portable.ts'
 import { DesktopProjectManager, type DesktopProjectHooks } from './project-manager.ts'
 import { DesktopHostProcess } from './host-process.ts'
 import { DesktopBackendController, type DesktopBackendState } from './backend-controller.ts'
@@ -148,6 +149,7 @@ async function serveShellAsset(request: Request): Promise<Response> {
 }
 
 async function main(): Promise<void> {
+  if (portableFailure !== undefined) throw portableFailure
   const resources = runtimeResources()
   const paths = resolveDesktopPaths()
   const development = app.isPackaged ? undefined : join(app.getAppPath(), '.desktop-build', 'development', 'project')
@@ -501,6 +503,16 @@ async function main(): Promise<void> {
   }
   publishUpdate(updateState)
   setTimeout(() => { void checkAndPrompt(false) }, 10_000)
+}
+
+// The portable layout must precede the single-instance lock, because the lock
+// lives in the Electron profile that the layout moves. A failure here cannot
+// create a window yet, so it is carried into `main` for the emergency document.
+let portableFailure: Error | undefined
+try {
+  applyPortableLayout(app)
+} catch (error: unknown) {
+  portableFailure = error instanceof Error ? error : new Error(String(error))
 }
 
 const ownsDesktopInstance = claimDesktopSingleInstance(app, () => { focusPrimaryWindow() })

@@ -171,6 +171,7 @@ export function resolveDesktopPackageTarget(
 interface DesktopPackageInvocation {
   readonly target: DesktopPackageTarget
   readonly directory: boolean
+  readonly portable: boolean
   readonly prepareOnly: boolean
   readonly unsigned: boolean
 }
@@ -183,6 +184,12 @@ function hostTargetName(platform: NodeJS.Platform, arch: string): DesktopPackage
 
 /**
  * Parse the fixed-target packaging command line.
+ *
+ * A portable invocation is always unsigned, because it exists to produce a local
+ * archive rather than a published release. Combined with `--dir` it yields a
+ * directly runnable unpacked folder carrying the portable marker, which is the
+ * short path for exercising the portable runtime without an archive round trip.
+ *
  * @param argv - Arguments after the script entry point.
  * @param hostPlatform - Build-host Node.js platform.
  * @param hostArch - Build-host Node.js architecture.
@@ -198,19 +205,23 @@ export function parseDesktopPackageInvocation(
     allowPositionals: true,
     options: {
       dir: { type: 'boolean', default: false },
+      portable: { type: 'boolean', default: false },
       'prepare-only': { type: 'boolean', default: false },
       unsigned: { type: 'boolean', default: false },
     },
   })
   if (positionals.length > 1) throw new Error('desktop package: expected at most one target')
   const name = positionals[0] ?? hostTargetName(hostPlatform, hostArch)
+  if (values.portable && name !== 'win-x64') throw new Error('desktop package: --portable requires win-x64')
+  if (values.portable && values['prepare-only']) throw new Error('desktop package: --portable cannot use --prepare-only')
   if (values.unsigned && name !== 'win-x64') throw new Error('desktop package: --unsigned requires win-x64')
   if (values.unsigned && values['prepare-only']) throw new Error('desktop package: --unsigned cannot use --prepare-only')
   return {
     target: resolveDesktopPackageTarget(name, hostPlatform, hostArch),
     directory: values.dir,
+    portable: values.portable,
     prepareOnly: values['prepare-only'],
-    unsigned: values.unsigned,
+    unsigned: values.unsigned || values.portable,
   }
 }
 
@@ -284,6 +295,9 @@ async function main(): Promise<void> {
     DSH_DESKTOP_TARGET_ARCH: target.arch,
   }
   const electronBuilderEnv = desktopElectronBuilderEnvironment(targetEnv, invocation.unsigned)
+  // Opts the electron-builder configuration into the `zip` target and the marker beside
+  // the executable, without letting the flag leak into the preparation subprocesses.
+  if (invocation.portable) electronBuilderEnv.DSH_DESKTOP_PORTABLE = '1'
   for (const name of WINDOWS_SIGNING_ENV_NAMES) {
     if (!invocation.unsigned && process.env[name] !== undefined) electronBuilderEnv[name] = process.env[name]
   }

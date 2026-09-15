@@ -19,6 +19,10 @@ export interface DesktopElectronBuilderConfig {
     readonly sign: boolean
     readonly writeUpdateInfo: boolean
   }
+  readonly win: {
+    readonly target: readonly string[]
+    readonly extraFiles?: readonly [{ readonly from: string, readonly to: 'portable.txt' }]
+  }
   readonly nsis: {
     readonly include: string
   }
