@@ -12,7 +12,7 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join } from 'node:path'
 import { resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
 
 const BUILD_PATHS = resolveDesktopTargetBuildPaths()
@@ -20,7 +20,7 @@ const DOWNLOAD_ROOT = BUILD_PATHS.downloads
 const RUNTIME_ROOT = BUILD_PATHS.runtime
 const TOOLS_ROOT = join(RUNTIME_ROOT, 'tools')
 
-/** One tool description: where to find it and which sub-dir is the PATH entry. */
+/** One tool description: where to find it and which sub-dirs are PATH entries. */
 interface ToolSpec {
   /** Directory name under `runtime/tools/`. */
   readonly name: string
@@ -32,11 +32,12 @@ interface ToolSpec {
    */
   readonly sources: readonly string[]
   /**
-   * Directory *inside* the tool copy that should be added to PATH, relative
-   * to `runtime/tools/<name>/`.  Empty string means the root.
+   * Directories *inside* the tool copy that should be added to PATH, relative
+   * to `runtime/tools/<name>/`.  Empty string means the root.  Multiple
+   * entries are prepended in order (first = highest priority).
    */
-  readonly pathDir: string
-  /** When true, do not copy but instead create the entry and copy only pathDir. */
+  readonly pathDirs: readonly string[]
+  /** Optional filter: only files whose relative path returns true are copied. */
   readonly filter?: (relPath: string) => boolean
 }
 
@@ -60,7 +61,7 @@ const TOOLS: readonly ToolSpec[] = [
     ],
     // `cmd/git.exe` is the thin shim that exposes only `git` without also
     // putting 300+ MSYS2 utilities onto PATH (which `mingw64/bin` would do).
-    pathDir: 'cmd',
+    pathDirs: ['cmd'],
   },
   {
     name: 'python',
@@ -69,8 +70,8 @@ const TOOLS: readonly ToolSpec[] = [
       'WinPython64-3.14.7.1dotb1',
       'python',
     ],
-    // The python.exe lives at the root of the python/ subtree we keep.
-    pathDir: 'python',
+    // python.exe at the root; pip/wheel/etc. live in Scripts/.
+    pathDirs: ['python', 'python/Scripts'],
     filter: keepWinPython,
   },
   {
@@ -80,7 +81,7 @@ const TOOLS: readonly ToolSpec[] = [
       'pandoc-3.11-windows-x86_64',
       'pandoc',
     ],
-    pathDir: '',
+    pathDirs: [''],
   },
   {
     name: 'sqlite',
@@ -89,7 +90,7 @@ const TOOLS: readonly ToolSpec[] = [
       'sqlite-tools-win-x64',
       'sqlite',
     ],
-    pathDir: '',
+    pathDirs: [''],
   },
   {
     name: 'lua',
@@ -97,7 +98,7 @@ const TOOLS: readonly ToolSpec[] = [
       'lua-5.5.0_Win64_bin',
       'lua',
     ],
-    pathDir: '',
+    pathDirs: [''],
   },
   {
     name: 'busybox',
@@ -105,7 +106,7 @@ const TOOLS: readonly ToolSpec[] = [
       'busybox.exe',
     ],
     // Single-file tool: copy the file itself into the tool dir.
-    pathDir: '',
+    pathDirs: [''],
   },
   {
     name: '7z',
@@ -115,7 +116,7 @@ const TOOLS: readonly ToolSpec[] = [
       '7zip',
     ],
     // `7z.exe` is the CLI; `7z.dll` must sit beside it for plugins to load.
-    pathDir: '',
+    pathDirs: [''],
   },
 ]
 
@@ -160,7 +161,7 @@ function copyFiltered(
 
 interface ManifestEntry {
   readonly name: string
-  readonly pathDir: string
+  readonly pathDirs: readonly string[]
 }
 
 function main(): void {
@@ -187,16 +188,17 @@ function main(): void {
 
     copyFiltered(resolved.path, dest, spec.filter, resolved.isFile)
 
-    // Verify the entry point actually exists after filtering.
-    const entryPoint = join(dest, spec.pathDir)
-    if (!existsSync(entryPoint)) {
-      console.warn(`prepare:tools — ${spec.name}: entry point missing after copy (${relative(TOOLS_ROOT, entryPoint)})`)
+    // Verify every PATH entry directory actually exists after filtering.
+    const missing = spec.pathDirs.find(dir => !existsSync(join(dest, dir)))
+    if (missing !== undefined) {
+      console.warn(`prepare:tools — ${spec.name}: entry point missing after copy (${missing})`)
       rmSync(dest, { recursive: true, force: true })
       continue
     }
 
-    present.push({ name: spec.name, pathDir: spec.pathDir })
-    console.log(`prepare:tools — ${spec.name}: staged (${relative(RUNTIME_ROOT, entryPoint)})`)
+    present.push({ name: spec.name, pathDirs: spec.pathDirs })
+    const firstEntry = spec.pathDirs[0] === '' ? spec.name : `${spec.name}/${spec.pathDirs[0]}`
+    console.log(`prepare:tools — ${spec.name}: staged (tools/${firstEntry}${spec.pathDirs.length > 1 ? ` +${spec.pathDirs.length - 1}` : ''})`)
   }
 
   writeFileSync(
