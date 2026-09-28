@@ -74,6 +74,7 @@ export function createElectronBuilderConfig(
       { from: buildPaths.dsh, to: 'dsh' },
       // electron-builder excludes a source directory's root node_modules.
       { from: join(buildPaths.dsh, 'node_modules'), to: 'dsh/node_modules' },
+      { from: fileURLToPath(new URL('./bundled-skills', import.meta.url)), to: 'bundled-skills' },
     ],
     mac: {
       category: 'public.app-category.developer-tools',

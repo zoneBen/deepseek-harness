@@ -151,6 +151,10 @@ async function serveShellAsset(request: Request): Promise<Response> {
 async function main(): Promise<void> {
   if (portableFailure !== undefined) throw portableFailure
   const resources = runtimeResources()
+  const bundledSkillsDir = app.isPackaged
+    ? join(process.resourcesPath, 'bundled-skills')
+    : join(app.getAppPath(), 'bundled-skills')
+  process.env.DSH_BUNDLED_SKILL_DIR = bundledSkillsDir
   const paths = resolveDesktopPaths()
   const development = app.isPackaged ? undefined : join(app.getAppPath(), '.desktop-build', 'development', 'project')
   const activeProject = development ?? paths.profile
