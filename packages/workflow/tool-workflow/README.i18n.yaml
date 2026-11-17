@@ -18,8 +18,8 @@
   en: a0a9d655187f285d
   zh: 230b4556fff9f08b
 /deepseek-ai-dsh-tool-workflow/use-this-package/calling-the-tool:
-  en: aeebba9469f0558d
-  zh: e2e74d4272e94201
+  en: 6c0da68a33e5501e
+  zh: ff683dd4de65fc7b
 /deepseek-ai-dsh-tool-workflow/use-this-package/what-to-expect-during-a-run:
   en: 19ec4f830edb8e1a
   zh: 8579ae5274aca6de
@@ -36,23 +36,23 @@
   en: 6d09119d1393c254
   zh: a7cc03daa59650ec
 /deepseek-ai-dsh-tool-workflow/understand-the-implementation/run-lifecycle:
-  en: 8ea9ce564251249a
-  zh: a59b88cc14a25a1f
+  en: ef2c2a573b30c262
+  zh: 5a078b9fe31e333d
 /deepseek-ai-dsh-tool-workflow/understand-the-implementation/background-lifecycle:
   en: 35950b2015800ec5
   zh: 5ae6f5a5e53dc585
 /deepseek-ai-dsh-tool-workflow/understand-the-implementation/durable-session-records:
-  en: b491e7ab9590e625
-  zh: c0a2fb797eb1cca0
+  en: e5bbbb7788d6dcdf
+  zh: aa035f074f7ac021
 /deepseek-ai-dsh-tool-workflow/understand-the-implementation/render-intent:
   en: 389b3740ec1f5ac2
   zh: 78430014f5e270e2
 /deepseek-ai-dsh-tool-workflow/understand-the-implementation/source-map:
-  en: 8a426c65b06a2320
-  zh: e2bb8f12252fbd4d
+  en: c22defb9681d39c7
+  zh: 0856b88d731fb127
 /deepseek-ai-dsh-tool-workflow/further-exploration:
-  en: cf5f97e745586c05
-  zh: 32fa36224cde5d83
+  en: 7522ab6b5866e47b
+  zh: 0fdfb25026defbff
 /deepseek-ai-dsh-tool-workflow/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90
@@ -87,8 +87,8 @@
   en: 9717b983b6a857e3
   zh: 611a2dadf7c0c706
 /deepseek-ai-dsh-tool-workflow/model-experience/tool-call-history-and-result/what-the-model-sees:
-  en: acd5e87161ced588
-  zh: 5ffe85926ee1b88d
+  en: 483515bf4c1dc710
+  zh: 69b23bd7f331ddea
 /deepseek-ai-dsh-tool-workflow/model-experience/tool-call-history-and-result/token-effect:
   en: 88cfc89c7dc19dbb
   zh: 75e674844f311937

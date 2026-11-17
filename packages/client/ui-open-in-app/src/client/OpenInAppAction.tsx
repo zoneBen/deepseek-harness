@@ -1,40 +1,38 @@
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { APP_LABEL_KEY } from './applications.ts'
 import type { OpenInAppLaunchState } from './controller.ts'
+import type { OpenInAppOutcome } from './outcome.ts'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { NS } from './locales.ts'
-import { OpenTargetButton } from './OpenTargetButton.tsx'
+import { OpenTargetButton, type OpenTargetReporter } from './OpenTargetButton.tsx'
 
-/** Browser operations and state injected into the Session Header contribution. */
-export interface OpenInAppActionInjected {
+/** Directory operations and state shared with Session application submenus. */
+export interface OpenInAppActionInjected extends OpenTargetReporter {
   hooks: {
     openInAppApps: ObservableSnapshot<readonly string[] | null>
     openInAppChoice: ObservableSnapshot<string>
     openInAppLaunch: ObservableSnapshot<OpenInAppLaunchState>
     shortcuts: ObservableSnapshot<readonly ShortcutCatalogEntry[]>
   }
-  launch: (appId: string, path: string) => Promise<void>
+  launch: (appId: string, path: string) => Promise<OpenInAppOutcome>
   choose: (appId: string) => void
   iconUrl: (appId: string) => string
 }
 
-/** Full props for the Session-header open-in-app split button. */
+/** Directory path, installed applications, and launch operations for the split button. */
 export type OpenInAppActionProps =
-  PropsRuntime<'conversation.session.header.utilities'>
-  & PropsLocale<typeof NS>
+  PropsLocale<typeof NS>
   & InjectFace<OpenInAppActionInjected>
-
+  & { absolutePath: string }
 
 /**
  * Adapt the installed directory catalog to the shared opening control.
- * @param props - workspace state, installed catalog, and launch operations.
- * @returns the shared control, or null without an eligible application and directory.
+ * @param props - displayed directory, installed catalog, launch operations, and the announcement seat.
+ * @returns the shared control, or null without an eligible application.
  */
 export function OpenInAppAction(props: OpenInAppActionProps): React.JSX.Element | null {
-  const { sessionId, useSessions, useOpenInAppApps, useOpenInAppChoice, t } = props
-  const cwd = useSessions(state => state.byId[sessionId]?.cwd)
+  const { absolutePath, useOpenInAppApps, useOpenInAppChoice, t } = props
   const available = useOpenInAppApps(apps => apps)
   const choice = useOpenInAppChoice(id => id)
   const operation = props.useOpenInAppLaunch(value => value)
@@ -44,21 +42,16 @@ export function OpenInAppAction(props: OpenInAppActionProps): React.JSX.Element 
     return key === undefined ? [] : [{ id, name: t(key), icon: props.iconUrl(id) }]
   })
   const preferred = apps.find(app => app.id === choice) ?? apps[0]
-  if (preferred === undefined || cwd === undefined || cwd === '') return null
+  if (preferred === undefined) return null
   return (
     <OpenTargetButton
-      key={cwd} kind="directory" applications={apps} defaultId={preferred.id} failed={false} t={t}
-      busy={operation.phase === 'busy'} shortcut={shortcut}
+      key={absolutePath} kind="directory" applications={apps} defaultId={preferred.id} failed={false} t={t}
+      busy={operation.phase === 'busy'} shortcut={shortcut} report={props.report}
       execute={async (operation) => {
         const id = operation.kind === 'application' ? operation.id : preferred.id
-        try {
-          await props.launch(id, cwd)
-        } catch (_error) {
-          // Native launch failure is announced by the shared control.
-          return 'openError'
-        }
-        if (operation.kind === 'application') props.choose(id)
-        return null
+        const outcome = await props.launch(id, absolutePath)
+        if (outcome.kind === 'opened' && operation.kind === 'application') props.choose(id)
+        return outcome
       }}
     />
   )

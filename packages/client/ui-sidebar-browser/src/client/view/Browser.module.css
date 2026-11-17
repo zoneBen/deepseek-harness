@@ -34,9 +34,11 @@
   cursor: pointer;
 }
 
-.tool:hover:not(:disabled) {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-interactive-bg-hover);
+@media (hover: hover) {
+  .tool:hover:not(:disabled) {
+    color: var(--dsw-alias-label-primary);
+    background: var(--dsw-alias-interactive-bg-hover);
+  }
 }
 
 .tool:disabled {
@@ -224,9 +226,9 @@
 .sandboxWarning {
   flex: 0 0 auto;
   padding: 6px 12px;
-  color: var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary));
+  color: var(--dsw-alias-label-secondary);
   font: var(--dsw-font-xxxs-11);
-  background: color-mix(in srgb, var(--dsw-alias-state-warning-primary, var(--dsw-alias-state-business-primary)) 8%, transparent);
+  background: var(--dsw-alias-state-warn-tertiary);
 }
 
 .limit {

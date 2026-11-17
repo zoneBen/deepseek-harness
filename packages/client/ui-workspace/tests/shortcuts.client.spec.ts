@@ -7,8 +7,10 @@ import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionListState, SessionSummary, SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import { SessionForkError } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { ShortcutCommand, ShortcutGesture } from '@deepseek-ai/dsh-client-shortcuts/client'
+import type { ShortcutCommand, ShortcutGesture, ShortcutPlatform } from '@deepseek-ai/dsh-client-shortcuts/client'
+import type { PanelInfo, MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { ShortcutRegistry } from '../../shortcuts/src/client/registry.ts'
+import { provideSessionStatus } from './session-status.client.ts'
 import { createWorkspaceShortcutControls, installWorkspaceShortcuts } from '../src/client/shortcuts.ts'
 import { en, zh } from '../src/client/locales.ts'
 
@@ -22,10 +24,10 @@ const row = (id: string, main = false): SessionSummary => ({
   id: sid(id), title: id, displayTitle: id, cwd: `/workspace/${id}`, blank: false,
   running: false, updatedAt: 0, retainedBy: main ? { mainView: 1 } : {},
 })
-async function bench(runtime: 'web' | 'desktop' = 'desktop') {
+async function bench(runtime: 'web' | 'desktop' = 'desktop', platform: ShortcutPlatform = 'macos') {
   const ctx = new Context()
   onTestFinished(async () => { await ctx.fiber.dispose() })
-  const registry = new ShortcutRegistry(runtime, 'macos')
+  const registry = new ShortcutRegistry(runtime, platform)
   const commands = new Map<string, ShortcutCommand>()
   ctx.provide('shortcuts', { register: (command: ShortcutCommand) => {
     commands.set(command.id, command)
@@ -41,6 +43,13 @@ async function bench(runtime: 'web' | 'desktop' = 'desktop') {
     sessionId: sid(id), session: { ...history, loadOlder },
   }]))
   ctx.provide('sessions', { list, binding: (id: SessionId) => bindings.get(id) })
+  const panelInfo = createSnapshotStore<PanelInfo>({ activePanelId: null })
+  ctx.provide('layout', { panelInfo })
+  const workspaces = createSnapshotStore<{ readonly archivedSessionIds: readonly SessionId[] }>({ archivedSessionIds: [] })
+  ctx.provide('workspaces', { list: workspaces } as never)
+  const status = provideSessionStatus(ctx)
+  const access = createSnapshotStore(true)
+  ctx.provide('remoteAccess', { source: () => access })
   const directory = createSnapshotStore(true)
   ctx.provide('slots', { entries: () => directory.getSnapshot() ? [{}] : [], subscribe: (_name: string, listener: () => void) => directory.subscribe(listener) })
   const locale = new LocaleRuntime(ctx)
@@ -51,14 +60,18 @@ async function bench(runtime: 'web' | 'desktop' = 'desktop') {
     startSession: vi.fn(), forkSession: vi.fn(async () => 'fork-child' as SessionId), archiveSession: vi.fn(async (_sessionId: SessionId) => {}),
   }
   const controls = createWorkspaceShortcutControls()
+  const reportForkFailure = vi.fn()
+  const markSession = vi.fn()
   const fiber = ctx.plugin((scoped) => {
-    installWorkspaceShortcuts(scoped, navigation, controls, (id) => { void navigation.archiveSession(id) })
+    installWorkspaceShortcuts(scoped, navigation, controls,
+      (id) => { void navigation.archiveSession(id) }, reportForkFailure, markSession)
   })
   await fiber.await()
   const select = (id: string) => { list.set({ ...list.getSnapshot(), byId: {
     [sid('a')]: row('a', id === 'a'), [sid('b')]: row('b', id === 'b'),
   } }) }
-  return { ctx, fiber, registry, commands, navigation, controls, list, directory, select, history, loadOlder }
+  return { ctx, fiber, registry, commands, navigation, controls, reportForkFailure, list, directory,
+    select, history, loadOlder, panelInfo, status, access, markSession, workspaces }
 }
 
 afterEach(() => { vi.restoreAllMocks() })
@@ -74,18 +87,65 @@ describe('workspace shortcut ownership', () => {
     b.controls.add()
     expect(b.controls.state.getSnapshot().addRequested).toBe(false)
   })
-  it('registers six commands with Desktop and Web defaults and removes registrations with the plugin', async () => {
+  it.each([
+    ['session.new', 'KeyN'], ['session.search', 'KeyK'], ['workspace.add', 'KeyO'],
+    ['session.rename', 'KeyG'], ['session.fork', 'KeyF'], ['session.archive', 'KeyA'],
+  ])('allows %s from the drawer and blocks it behind another dialog', async (id, code) => {
+    const b = await bench('web')
+    const gesture = key(code, { alt: code !== 'KeyF', shift: code === 'KeyF' })
+    expect(b.registry.dispatch(gesture, { ...context, modal: 'settings' }, vi.fn()).status).toBe('blocked')
+    expect(b.registry.dispatch(gesture, { ...context, modal: 'sidebar' }, vi.fn()).status).toBe('handled')
+    expect(b.commands.get(id)!.modals).toContain('sidebar')
+  })
+
+  it('registers commands with Desktop and Web defaults and removes registrations with the plugin', async () => {
     const b = await bench()
     expect(b.registry.catalog.getSnapshot().map(row => row.id)).toEqual([
       'session.new', 'session.search', 'workspace.add', 'session.rename', 'session.fork', 'session.archive',
+      'session.toggleRead',
     ])
     expect(b.registry.catalog.getSnapshot().every(row => row.keys.length > 0)).toBe(true)
     const web = await bench('web')
     expect(web.registry.catalog.getSnapshot().map(row => row.aria)).toEqual([
-      'Alt+Meta+N', 'Alt+Meta+K', 'Alt+Meta+O', 'Shift+Meta+R', 'Shift+Meta+F', 'Alt+Meta+A',
+      'Alt+Meta+N', 'Alt+Meta+K', 'Alt+Meta+O', 'Alt+Meta+G', 'Shift+Meta+F', 'Alt+Meta+A',
+      'Shift+Meta+U',
     ])
     await b.fiber.dispose()
     expect(b.registry.catalog.getSnapshot()).toEqual([])
+  })
+
+  it.each([
+    { runtime: 'web', platform: 'macos' }, { runtime: 'web', platform: 'windows' },
+    { runtime: 'desktop', platform: 'macos' }, { runtime: 'desktop', platform: 'windows' },
+  ] as const)('uses the shared three-key rename binding on $runtime/$platform', async ({ runtime, platform }) => {
+    const b = await bench(runtime, platform)
+    const primary = { meta: platform === 'macos', control: platform === 'windows' }
+    const consume = vi.fn()
+    for (const shift of [false, true]) {
+      expect(b.registry.dispatch(key('KeyR', { ...primary, shift }), context, consume)).toEqual({ status: 'pass' })
+    }
+    expect(consume).not.toHaveBeenCalled()
+    expect(b.controls.state.getSnapshot().renameTarget).toBeNull()
+    expect(b.registry.dispatch(key('KeyG', { ...primary, alt: true }), context, consume).status).toBe('handled')
+    expect(b.controls.state.getSnapshot().renameTarget?.sessionId).toBe('a')
+  })
+
+  it.each(['web', 'desktop'] as const)('renames only a nonblank main Conversation without an obscuring modal on %s', async (runtime) => {
+    const b = await bench(runtime)
+    const gesture = key('KeyG', { alt: true })
+    const invoke = (modal: string | null = null) => b.registry.dispatch(gesture, { ...context, modal }, vi.fn())
+    b.list.set({ ...b.list.getSnapshot(), byId: { [sid('a')]: { ...row('a', true), blank: true } } })
+    expect(invoke().status).toBe('blocked')
+    expect(b.controls.state.getSnapshot().renameTarget).toBeNull()
+    b.select('a')
+    b.panelInfo.set({ activePanelId: 'plugins' as MainPanelId })
+    expect(invoke().status).toBe('blocked')
+    expect(b.controls.state.getSnapshot().renameTarget).toBeNull()
+    b.panelInfo.set({ activePanelId: null })
+    expect(invoke('settings').status).toBe('blocked')
+    expect(b.controls.state.getSnapshot().renameTarget).toBeNull()
+    expect(invoke().status).toBe('handled')
+    expect(b.controls.state.getSnapshot().renameTarget?.sessionId).toBe('a')
   })
 
   it('uses the owner for new/search/add from terminals and modals while preserving repeat and directory occupancy', async () => {
@@ -151,12 +211,11 @@ describe('workspace shortcut ownership', () => {
     ))
     const invoke = () => b.registry.dispatch(key('KeyF', { alt: true }), context, vi.fn())
     expect(invoke().status).toBe('handled')
-    await vi.waitFor(() => { expect(b.controls.state.getSnapshot().forkError).toMatchObject({ reason: 'unavailable' }) })
+    await vi.waitFor(() => { expect(b.reportForkFailure).toHaveBeenCalledExactlyOnceWith('unavailable') })
     expect(warning).not.toHaveBeenCalled()
-    b.controls.dismissForkError()
     b.navigation.forkSession.mockRejectedValueOnce(new Error('connection closed'))
     expect(invoke().status).toBe('handled')
-    await vi.waitFor(() => { expect(b.controls.state.getSnapshot().forkError).toMatchObject({ reason: 'failed' }) })
+    await vi.waitFor(() => { expect(b.reportForkFailure).toHaveBeenNthCalledWith(2, 'failed') })
     expect(warning).toHaveBeenCalledOnce()
     b.list.set({ ...b.list.getSnapshot(), byId: { [sid('a')]: { ...row('a', true), running: true } } })
     expect(invoke().status).toBe('handled')
@@ -179,4 +238,52 @@ it('opens an empty rename draft for unnamed history instead of its directory lab
   expect(command.status).toBe('handled')
   if (command.status === 'handled') command.run()
   expect(b.controls.state.getSnapshot().renameTarget).toEqual({ sessionId: 'a', currentTitle: '' })
+})
+
+it.each([
+  ['desktop', 'macos'], ['web', 'macos'], ['desktop', 'windows'], ['web', 'windows'],
+] as const)('toggles the main Session reading state with the %s/%s binding', async (runtime, platform) => {
+  const b = await bench(runtime, platform)
+  const gesture = key('KeyU', { shift: true, meta: platform === 'macos', control: platform === 'windows' })
+  expect(b.registry.dispatch(gesture, context, vi.fn()).status).toBe('handled')
+  expect(b.markSession).toHaveBeenLastCalledWith(sid('a'), true)
+  b.status.setUnread(sid('a'), true)
+  expect(b.registry.dispatch(gesture, context, vi.fn()).status).toBe('handled')
+  expect(b.markSession).toHaveBeenLastCalledWith(sid('a'), false)
+  const command = b.commands.get('session.toggleRead')!.resolve(context)
+  b.select('b')
+  if (command.status !== 'handled') throw new Error('reading action was unavailable')
+  command.run()
+  expect(b.markSession).toHaveBeenLastCalledWith(sid('a'), false)
+})
+
+it.each(['desktop', 'web'] as const)('leaves Linux %s reading bindings available for customization without a default', async (runtime) => {
+  const b = await bench(runtime, 'linux')
+  expect(b.registry.catalog.getSnapshot().find(command => command.id === 'session.toggleRead')?.binding).toBeNull()
+  expect(b.registry.dispatch(key('KeyU', { shift: true, meta: false, control: true }), context, vi.fn())).toEqual({ status: 'pass' })
+  expect(b.markSession).not.toHaveBeenCalled()
+})
+
+it('blocks reading shortcuts while unavailable or outside the main Conversation and passes without mark access', async () => {
+  const b = await bench()
+  const command = b.commands.get('session.toggleRead')!
+  b.status.readingReady.set(false)
+  expect(command.resolve(context)).toMatchObject({ status: 'blocked', reason: en['shortcut.readingUnavailable'] })
+  b.status.readingReady.set(true)
+  b.access.set(false)
+  expect(command.resolve(context)).toEqual({ status: 'pass' })
+  expect(command.resolve({ ...context, modal: 'settings' })).toEqual({ status: 'pass' })
+  b.access.set(true)
+  expect(command.resolve({ ...context, modal: 'settings' })).toMatchObject({ status: 'blocked', reason: en['shortcut.closeDialog'] })
+  b.panelInfo.set({ activePanelId: 'plugins' as MainPanelId })
+  expect(command.resolve(context)).toMatchObject({ status: 'blocked', reason: en['shortcut.closePanel'] })
+  b.panelInfo.set({ activePanelId: null })
+  b.workspaces.set({ archivedSessionIds: [sid('a')] })
+  expect(command.resolve(context)).toMatchObject({ status: 'blocked', reason: en['shortcut.archivedReading'] })
+  b.workspaces.set({ archivedSessionIds: [] })
+  b.list.set({ ...b.list.getSnapshot(), byId: { [sid('a')]: { ...row('a', true), blank: true } } })
+  expect(command.resolve(context)).toMatchObject({ status: 'blocked', reason: en['shortcut.noSession'] })
+  b.select('none')
+  expect(command.resolve(context)).toMatchObject({ status: 'blocked', reason: en['shortcut.noSession'] })
+  expect(b.markSession).not.toHaveBeenCalled()
 })
